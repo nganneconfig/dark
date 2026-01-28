@@ -1,7 +1,18 @@
 getgenv().Settings = {
+    ["API"] = {
+        ["URL"] = "";
+        ["Method"] = "POST";
+        ["Headers"] = {
+            ["Content-Type"] = "application/json";
+        };
+        ["Body"] = {
+            ["Player"] = LocalPlayer.Name;
+            ["PlayerId"] = LocalPlayer.UserId;
+        };
+    };
     ["Max Chests"] = 50; -- if you collected 50 chests, hop server
     ["Reset After Collect Chests"] = 10; -- if you collected 10 chests, it will reset for safe (anti kick)
-    ["Katakuri Progress"] = 100; -- 400 monster left
+    ["Katakuri Progress"] = 200; -- 400 monster left
     ["Fragments"] = 5000; -- Auto farm fragments until you have 5000 fragments to buy the chip
 }
 
@@ -680,6 +691,4 @@ GuiService.ErrorMessageChanged:Connect(newcclosure(function()
     if GuiService:GetErrorType() == Enum.ConnectionError.DisconnectErrors then
         while true do TeleportService:TeleportToPlaceInstance(PlaceId, JobId, LocalPlayer) task.wait(5) end
     end
-
-end))
-
+end)) 
