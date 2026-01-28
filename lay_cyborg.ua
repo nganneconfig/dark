@@ -691,4 +691,5 @@ GuiService.ErrorMessageChanged:Connect(newcclosure(function()
     if GuiService:GetErrorType() == Enum.ConnectionError.DisconnectErrors then
         while true do TeleportService:TeleportToPlaceInstance(PlaceId, JobId, LocalPlayer) task.wait(5) end
     end
+
 end))
