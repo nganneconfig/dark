@@ -52,7 +52,7 @@ local function safeRequest(req)
 end
 
 --[[ 🔎 FIND EMPTY SERVER (ƯU TIÊN SERVER TRỐNG) ]]
-local function findLowPlayerServers()
+local function findLowPlayerServers(8)
 	local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
 	local r = safeRequest({
 		Url = url,
