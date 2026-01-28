@@ -1,15 +1,4 @@
 getgenv().Settings = {
-    ["API"] = {
-        ["URL"] = "";
-        ["Method"] = "POST";
-        ["Headers"] = {
-            ["Content-Type"] = "application/json";
-        };
-        ["Body"] = {
-            ["Player"] = LocalPlayer.Name;
-            ["PlayerId"] = LocalPlayer.UserId;
-        };
-    };
     ["Max Chests"] = 50; -- if you collected 50 chests, hop server
     ["Reset After Collect Chests"] = 10; -- if you collected 10 chests, it will reset for safe (anti kick)
     ["Katakuri Progress"] = 100; -- 400 monster left
@@ -693,3 +682,4 @@ GuiService.ErrorMessageChanged:Connect(newcclosure(function()
     end
 
 end))
+
