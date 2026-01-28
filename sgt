@@ -230,7 +230,7 @@ end)
 local function updatePlayerCount()
 	local current = #Players:GetPlayers()
 	local max = Players.MaxPlayers or "?"
-	PlayerCountLabel.Text = string.format("👥 Server: %d/%s người", current, max)
+	PlayerCountLabel.Text = string.format("👤 Server: %d/%s người", current, max)
 end
 updatePlayerCount()
 Players.PlayerAdded:Connect(updatePlayerCount)
