@@ -1,12 +1,14 @@
--- 🌙 AUTO HOP SERVER (EMPTY SERVER PRIORITY) - V5.4 🌙
+-- 🌙 AUTO HOP SERVER (EMPTY SERVER PRIORITY) - V5.5 🌙
 repeat task.wait() until game:IsLoaded()
 repeat task.wait() until game.Players and game.Players.LocalPlayer
+
 --[[ ⚙️ CONFIG ]]
 local TIMEOUT_SECONDS = 200
 local DAMAGE_COOLDOWN = 60
 local SCRIPT_DEBUG = false
 local BELI_NAME = "Beli"
 local FRAG_NAME = "Fragments"
+local MAX_PLAYER_TARGET = 5 -- ưu tiên server <= 5 người
 
 --[[ ⚙️ SERVICES ]]
 local Players = game:GetService("Players")
@@ -17,6 +19,7 @@ local StarterGui = game:GetService("StarterGui")
 
 local localPlayer = Players.LocalPlayer
 local PLACE_ID = game.PlaceId
+local API = "https://games.roblox.com/v1/games/"
 
 --[[ ⚙️ STATE ]]
 local autoHopEnabled = true
@@ -29,7 +32,9 @@ local lastDamageTime = 0
 
 --[[ 🪶 DEBUG ]]
 local function debugPrint(...)
-	if SCRIPT_DEBUG then print("[AutoHop]", ...) end
+	if SCRIPT_DEBUG then
+		print("[AutoHop]", ...)
+	end
 end
 
 local function notify(title, text)
@@ -51,53 +56,52 @@ local function safeRequest(req)
 	end
 end
 
---[[ 🔎 FIND EMPTY SERVER (ƯU TIÊN SERVER TRỐNG) ]]
-local function findLowPlayerServers()
-	local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
+--[[ 🔎 LIST SERVERS ]]
+local function listServers(cursor)
+	local url = API .. PLACE_ID .. "/servers/Public?sortOrder=Asc&limit=100"
+	if cursor then
+		url = url .. "&cursor=" .. cursor
+	end
+
 	local r = safeRequest({
 		Url = url,
 		Method = "GET",
 		Headers = {["Accept"] = "application/json"}
 	})
-	if not r or not r.Body then return {} end
 
-	local data = HttpService:JSONDecode(r.Body)
-	if not data or not data.data then return {} end
+	if not r or not r.Body then return nil end
+	return HttpService:JSONDecode(r.Body)
+end
 
-	local servers = {}
+--[[ 🔎 FIND LOW PLAYER SERVERS ]]
+local function findLowPlayerServers()
+	local serversFound = {}
+	local cursor = nil
 
-	for _, s in ipairs(data.data) do
-		if s.playing < s.maxPlayers and s.id ~= game.JobId then
-			table.insert(servers, {
-				id = s.id,
-				count = s.playing
-			})
+	repeat
+		local page = listServers(cursor)
+		if not page or not page.data then break end
+
+		for _, s in ipairs(page.data) do
+			if s.id ~= game.JobId and s.playing < s.maxPlayers then
+				table.insert(serversFound, {
+					id = s.id,
+					count = s.playing
+				})
+			end
 		end
-	end
 
-	table.sort(servers, function(a, b)
+		cursor = page.nextPageCursor
+	until not cursor
+
+	table.sort(serversFound, function(a, b)
 		return a.count < b.count
 	end)
 
-	return servers
+	return serversFound
 end
 
---[[ 🚀 HOP SERVER ]]
-local function hopServer()
-	debugPrint("Không có hoạt động trong thời gian chờ → Hop sang server ít người...")
-	local sid = findLowPlayerServer()
-	if sid then
-		pcall(function()
-			TeleportService:TeleportToPlaceInstance(PLACE_ID, sid, localPlayer)
-		end)
-	else
-		debugPrint("Không tìm thấy server phù hợp, teleport ngẫu nhiên.")
-		pcall(function()
-			TeleportService:Teleport(PLACE_ID, localPlayer)
-		end)
-	end
-end
---[[ 🚀 HOP SERVER ]]
+--[[ 🚀 HOP SERVER (NO COOLDOWN - RETRY) ]]
 local function hopServer()
 	notify("AutoHop", "🔍 Đang tìm server ít người...")
 	debugPrint("Bắt đầu tìm server low player")
@@ -106,32 +110,34 @@ local function hopServer()
 		local servers = findLowPlayerServers()
 
 		for _, s in ipairs(servers) do
-			debugPrint("Thử hop server:", s.id, "Players:", s.count)
+			if s.count <= MAX_PLAYER_TARGET then
+				debugPrint("Thử hop server:", s.id, "Players:", s.count)
 
-			local success = pcall(function()
-				TeleportService:TeleportToPlaceInstance(PLACE_ID, s.id, localPlayer)
-			end)
+				local success = pcall(function()
+					TeleportService:TeleportToPlaceInstance(PLACE_ID, s.id, localPlayer)
+				end)
 
-			if success then
-				debugPrint("Teleport thành công →", s.id)
-				return
-			else
-				debugPrint("Server full / lỗi → thử server khác")
-				task.wait(0.2)
+				if success then
+					debugPrint("Teleport thành công:", s.id)
+					return
+				else
+					debugPrint("Server full / lỗi → thử server khác")
+					task.wait(0.2)
+				end
 			end
 		end
 
-		debugPrint("Hết server hợp lệ → reload danh sách")
+		debugPrint("Không có server phù hợp → reload danh sách")
 		task.wait(1) -- nghỉ rất ngắn, KHÔNG cooldown
 	end
 end
 
---[[ 🧮 GET STAT VALUE ]]
+--[[ 🧮 GET STAT ]]
 local function getStat(name)
 	local stats = localPlayer:FindFirstChild("leaderstats")
 	if stats then
 		local val = stats:FindFirstChild(name)
-		if val ~= nil then
+		if val then
 			return tonumber(val.Value) or 0
 		end
 	end
@@ -146,95 +152,11 @@ local function watchDamageRemotes()
 				damageDetected = true
 				lastDamageTime = tick()
 				autoHopEnabled = false
-				debugPrint("Phát hiện gây damage → tạm dừng AutoHop")
+				debugPrint("Phát hiện damage → dừng AutoHop")
 			end)
 		end
 	end
-	ReplicatedStorage.DescendantAdded:Connect(function(v)
-		if v:IsA("RemoteEvent") and (v.Name:lower():find("damage") or v.Name:lower():find("hit")) then
-			v.OnClientEvent:Connect(function()
-				damageDetected = true
-				lastDamageTime = tick()
-				autoHopEnabled = false
-				debugPrint("Phát hiện gây damage (mới) → tạm dừng AutoHop")
-			end)
-		end
-	end)
 end
-
---[[ 🧭 UI ]]
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AutoHopUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game.CoreGui
-
-local function makeLabel(text, order)
-	local lbl = Instance.new("TextLabel")
-	lbl.Size = UDim2.new(0, 450, 0, 40)
-	lbl.Position = UDim2.new(0.5, -225, 0.3, order * 45)
-	lbl.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-	lbl.BackgroundTransparency = 0.3
-	lbl.BorderSizePixel = 0
-	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextScaled = true
-	lbl.Text = text
-	lbl.Parent = ScreenGui
-	lbl.ZIndex = 10
-	return lbl
-end
-
-local Title = makeLabel("🌙 AUTO HOP SERVER (ƯU TIÊN TRỐNG) 🌙", -2)
-local PlayerCountLabel = makeLabel("👤 Server: Đang tải...", -1)
-local StatusLabel = makeLabel("⏳ Đang khởi động AutoHop...", 0)
-local HopLabel = makeLabel("🔁 Đã hop: 0 lần", 1)
-
-local StopButton = Instance.new("TextButton")
-StopButton.Size = UDim2.new(0, 200, 0, 40)
-StopButton.Position = UDim2.new(0.5, -220, 0.55, 0)
-StopButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-StopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-StopButton.Font = Enum.Font.GothamBold
-StopButton.TextScaled = true
-StopButton.Text = "⏸ DỪNG AUTO HOP"
-StopButton.Parent = ScreenGui
-
-local StartButton = Instance.new("TextButton")
-StartButton.Size = UDim2.new(0, 200, 0, 40)
-StartButton.Position = UDim2.new(0.5, 20, 0.55, 0)
-StartButton.BackgroundColor3 = Color3.fromRGB(30, 100, 30)
-StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-StartButton.Font = Enum.Font.GothamBold
-StartButton.TextScaled = true
-StartButton.Text = "▶️ BẬT LẠI AUTO HOP"
-StartButton.Parent = ScreenGui
-
-StopButton.MouseButton1Click:Connect(function()
-	autoHopEnabled = false
-	StatusLabel.Text = "⏸ AutoHop đã bị tạm dừng."
-	debugPrint("AutoHop dừng thủ công.")
-	notify("AutoHop", "⏸ Đã tạm dừng AutoHop.")
-end)
-
-StartButton.MouseButton1Click:Connect(function()
-	damageDetected = false
-	beliIncreased = false
-	fragDecreased = false
-	shouldSkipHop = false
-	autoHopEnabled = true
-	StatusLabel.Text = "✅ AutoHop đã bật lại."
-	debugPrint("AutoHop bật lại thủ công.")
-	notify("AutoHop", "✅ AutoHop đã bật lại.")
-end)
-
-local function updatePlayerCount()
-	local current = #Players:GetPlayers()
-	local max = Players.MaxPlayers or "?"
-	PlayerCountLabel.Text = string.format("👤 Server: %d/%s người", current, max)
-end
-updatePlayerCount()
-Players.PlayerAdded:Connect(updatePlayerCount)
-Players.PlayerRemoving:Connect(updatePlayerCount)
 
 --[[ 🧩 WATCH STATS ]]
 local function watchPlayerStats()
@@ -249,11 +171,9 @@ local function watchPlayerStats()
 
 	if beliObj then
 		beliObj.Changed:Connect(function()
-			local cur = tonumber(beliObj.Value) or 0
-			if cur > beliStart then
-				beliIncreased = true
-				shouldSkipHop = true
+			if tonumber(beliObj.Value) > beliStart then
 				autoHopEnabled = false
+				shouldSkipHop = true
 				StatusLabel.Text = "💰 Beli tăng → Dừng AutoHop"
 			end
 		end)
@@ -261,12 +181,10 @@ local function watchPlayerStats()
 
 	if fragObj then
 		fragObj.Changed:Connect(function()
-			local cur = tonumber(fragObj.Value) or 0
-			if cur < fragStart then
-				fragDecreased = true
-				shouldSkipHop = true
+			if tonumber(fragObj.Value) < fragStart then
 				autoHopEnabled = false
-				StatusLabel.Text = "💎 Fragments giảm → Dừng AutoHop"
+				shouldSkipHop = true
+				StatusLabel.Text = "💎 Fragment giảm → Dừng AutoHop"
 			end
 		end)
 	end
@@ -279,7 +197,6 @@ spawn(function()
 
 	while true do
 		task.wait(1)
-		updatePlayerCount()
 
 		if not autoHopEnabled then
 			continue
@@ -287,47 +204,30 @@ spawn(function()
 
 		shouldSkipHop = false
 		local elapsed = 0
+
 		while elapsed < TIMEOUT_SECONDS do
 			task.wait(1)
 			elapsed += 1
-			updatePlayerCount()
 
-			if not autoHopEnabled then
-				StatusLabel.Text = "⏸ AutoHop đã bị dừng bởi người dùng."
-				break
-			end
-
-			if beliIncreased or fragDecreased or damageDetected then
+			if not autoHopEnabled then break end
+			if damageDetected or beliIncreased or fragDecreased then
 				shouldSkipHop = true
-				StatusLabel.Text = "⏸ Phát hiện hoạt động → Dừng AutoHop"
 				break
 			end
-
-			StatusLabel.Text = string.format("⏳ Tự động hop sau: %ds", TIMEOUT_SECONDS - elapsed)
 		end
 
-		if not shouldSkipHop and autoHopEnabled then
+		if autoHopEnabled and not shouldSkipHop then
 			hopCount += 1
-			HopLabel.Text = "🔁 Đã hop: " .. hopCount .. " lần"
-			StatusLabel.Text = "🚀 Không phát hiện hoạt động → Hop server trống hoặc ≤2 người..."
 			hopServer()
 		end
 
-		-- ⏱️ Cooldown
 		if damageDetected then
-			local remaining = DAMAGE_COOLDOWN - (tick() - lastDamageTime)
-			while remaining > 0 and damageDetected do
-				StatusLabel.Text = string.format("🕒 Cooldown: %.0fs còn lại...", remaining)
+			while tick() - lastDamageTime < DAMAGE_COOLDOWN do
 				task.wait(1)
-				remaining = DAMAGE_COOLDOWN - (tick() - lastDamageTime)
 			end
-		end
-
-		if damageDetected and (tick() - lastDamageTime) >= DAMAGE_COOLDOWN then
 			damageDetected = false
 			autoHopEnabled = true
-			StatusLabel.Text = "✅ Hết cooldown → AutoHop bật lại"
-			notify("AutoHop", "✅ Cooldown đã kết thúc, bật lại AutoHop.")
+			notify("AutoHop", "✅ Hết cooldown → bật lại AutoHop")
 		end
 	end
-end)  
+end) 
