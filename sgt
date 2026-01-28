@@ -51,45 +51,35 @@ local function safeRequest(req)
 	end
 end
 
---[[ 🔎 FIND EMPTY SERVER (ƯU TIÊN SERVER TRỐNG, RETRY KHÔNG COOLDOWN) ]]
-local function findLowPlayerServer()
-	while true do
-		local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
-		local r = safeRequest({
-			Url = url,
-			Method = "GET",
-			Headers = {["Accept"] = "application/json"}
-		})
+--[[ 🔎 FIND EMPTY SERVER (ƯU TIÊN SERVER TRỐNG) ]]
+local function findLowPlayerServers()
+	local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
+	local r = safeRequest({
+		Url = url,
+		Method = "GET",
+		Headers = {["Accept"] = "application/json"}
+	})
+	if not r or not r.Body then return {} end
 
-		if r and r.Body then
-			local success, data = pcall(function()
-				return HttpService:JSONDecode(r.Body)
-			end)
+	local data = HttpService:JSONDecode(r.Body)
+	if not data or not data.data then return {} end
 
-			if success and data and data.data then
-				local lowestServer = nil
-				local lowestCount = math.huge
+	local servers = {}
 
-				for _, s in ipairs(data.data) do
-					if s.playing < s.maxPlayers and s.id ~= game.JobId then
-						if s.playing < lowestCount then
-							lowestCount = s.playing
-							lowestServer = s.id
-						end
-					end
-				end
-
-				if lowestServer then
-					debugPrint("Tìm thấy server ít người:", lowestCount)
-					return lowestServer
-				end
-			end
+	for _, s in ipairs(data.data) do
+		if s.playing < s.maxPlayers and s.id ~= game.JobId then
+			table.insert(servers, {
+				id = s.id,
+				count = s.playing
+			})
 		end
-
-		-- ❗ KHÔNG COOLDOWN – tìm lại ngay
-		debugPrint("Không tìm được server low player → tìm lại ngay...")
-		task.wait(0.5)
 	end
+
+	table.sort(servers, function(a, b)
+		return a.count < b.count
+	end)
+
+	return servers
 end
 
 --[[ 🚀 HOP SERVER ]]
@@ -109,15 +99,30 @@ local function hopServer()
 end
 --[[ 🚀 HOP SERVER ]]
 local function hopServer()
-	local sid, isEmpty = findLowPlayerServer()
-	if sid then
-		local msg = isEmpty and "🚀 Đang chuyển sang server TRỐNG..." or "🚀 Đang chuyển sang server ≤2 người..."
-		notify("AutoHop", msg)
-		debugPrint(msg, sid)
-		pcall(function() TeleportService:TeleportToPlaceInstance(PLACE_ID, sid, localPlayer) end)
-	else
-		debugPrint("Không tìm thấy server phù hợp. Teleport random.")
-		pcall(function() TeleportService:Teleport(PLACE_ID, localPlayer) end)
+	notify("AutoHop", "🔍 Đang tìm server ít người...")
+	debugPrint("Bắt đầu tìm server low player")
+
+	while autoHopEnabled do
+		local servers = findLowPlayerServers()
+
+		for _, s in ipairs(servers) do
+			debugPrint("Thử hop server:", s.id, "Players:", s.count)
+
+			local success = pcall(function()
+				TeleportService:TeleportToPlaceInstance(PLACE_ID, s.id, localPlayer)
+			end)
+
+			if success then
+				debugPrint("Teleport thành công →", s.id)
+				return
+			else
+				debugPrint("Server full / lỗi → thử server khác")
+				task.wait(0.2)
+			end
+		end
+
+		debugPrint("Hết server hợp lệ → reload danh sách")
+		task.wait(1) -- nghỉ rất ngắn, KHÔNG cooldown
 	end
 end
 
@@ -180,7 +185,7 @@ local function makeLabel(text, order)
 end
 
 local Title = makeLabel("🌙 AUTO HOP SERVER (ƯU TIÊN TRỐNG) 🌙", -2)
-local PlayerCountLabel = makeLabel("👥 Server: Đang tải...", -1)
+local PlayerCountLabel = makeLabel("👤 Server: Đang tải...", -1)
 local StatusLabel = makeLabel("⏳ Đang khởi động AutoHop...", 0)
 local HopLabel = makeLabel("🔁 Đã hop: 0 lần", 1)
 
