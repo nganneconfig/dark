@@ -51,34 +51,45 @@ local function safeRequest(req)
 	end
 end
 
---[[ 🔎 FIND EMPTY SERVER (ƯU TIÊN SERVER TRỐNG) ]]
+--[[ 🔎 FIND EMPTY SERVER (ƯU TIÊN SERVER TRỐNG, RETRY KHÔNG COOLDOWN) ]]
 local function findLowPlayerServer()
-	local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
-	local r = safeRequest({
-		Url = url,
-		Method = "GET",
-		Headers = {["Accept"] = "application/json"}
-	})
-	if not r or not r.Body then return nil end
+	while true do
+		local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
+		local r = safeRequest({
+			Url = url,
+			Method = "GET",
+			Headers = {["Accept"] = "application/json"}
+		})
 
-	local data = HttpService:JSONDecode(r.Body)
-	if not data or not data.data then return nil end
+		if r and r.Body then
+			local success, data = pcall(function()
+				return HttpService:JSONDecode(r.Body)
+			end)
 
-	-- Tìm server có số người chơi ít nhất
-	local lowestServer = nil
-	local lowestCount = math.huge
+			if success and data and data.data then
+				local lowestServer = nil
+				local lowestCount = math.huge
 
-	for _, s in ipairs(data.data) do
-		if s.playing < s.maxPlayers and s.id ~= game.JobId then
-			if s.playing < lowestCount then
-				lowestCount = s.playing
-				lowestServer = s.id
+				for _, s in ipairs(data.data) do
+					if s.playing < s.maxPlayers and s.id ~= game.JobId then
+						if s.playing < lowestCount then
+							lowestCount = s.playing
+							lowestServer = s.id
+						end
+					end
+				end
+
+				if lowestServer then
+					debugPrint("Tìm thấy server ít người:", lowestCount)
+					return lowestServer
+				end
 			end
 		end
-	end
 
-	debugPrint("Tìm thấy server ít người:", lowestCount or "N/A")
-	return lowestServer
+		-- ❗ KHÔNG COOLDOWN – tìm lại ngay
+		debugPrint("Không tìm được server low player → tìm lại ngay...")
+		task.wait(0.5)
+	end
 end
 
 --[[ 🚀 HOP SERVER ]]
@@ -314,4 +325,4 @@ spawn(function()
 			notify("AutoHop", "✅ Cooldown đã kết thúc, bật lại AutoHop.")
 		end
 	end
-end) 
+end)  
