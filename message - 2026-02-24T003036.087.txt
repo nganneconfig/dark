@@ -1,0 +1,180 @@
+repeat task.wait() until game:IsLoaded()
+repeat task.wait() until game.Players and game.Players.LocalPlayer
+
+while true do
+	local TIMEOUT_SECONDS = 120
+	local SCRIPT_DEBUG = false
+	local BELI_NAME = "Beli"
+	local FRAG_NAME = "Fragments"
+
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local TeleportService = game:GetService("TeleportService")
+	local HttpService = game:GetService("HttpService")
+	local CoreGui = game:GetService("CoreGui")
+
+	local localPlayer = Players.LocalPlayer
+	local PLACE_ID = game.PlaceId
+
+	if not getgenv().STOP_HOP then
+		getgenv().STOP_HOP = false
+
+		local ScreenGui = Instance.new("ScreenGui")
+		ScreenGui.Name = "StopHopUI"
+		ScreenGui.Parent = CoreGui
+
+		local Button = Instance.new("TextButton")
+		Button.Size = UDim2.new(0, 160, 0, 40)
+		Button.Position = UDim2.new(0.8, 0, 0.05, 0)
+		Button.BackgroundColor3 = Color3.fromRGB(30, 150, 255)
+		Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+		Button.Font = Enum.Font.GothamBold
+		Button.TextSize = 16
+		Button.Text = "🟢 Auto Hop: ON"
+		Button.Parent = ScreenGui
+
+		Button.MouseButton1Click:Connect(function()
+			getgenv().STOP_HOP = not getgenv().STOP_HOP
+			if getgenv().STOP_HOP then
+				Button.Text = "🔴 Auto Hop: OFF"
+				Button.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+			else
+				Button.Text = "🟢 Auto Hop: ON"
+				Button.BackgroundColor3 = Color3.fromRGB(30, 150, 255)
+			end
+		end)
+	end
+
+	local function debugPrint(...)
+		if SCRIPT_DEBUG then
+			print(...)
+		end
+	end
+
+	local function safeRequest(req)
+		if syn and syn.request then
+			return syn.request(req)
+		elseif http and http.request then
+			return http.request(req)
+		elseif request then
+			return request(req)
+		elseif http_request then
+			return http_request(req)
+		end
+	end
+
+	local function findLowPlayerServer()
+		local url = ("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Asc&limit=100"):format(PLACE_ID)
+		local r = safeRequest({
+			Url = url,
+			Method = "GET",
+			Headers = {["Accept"] = "application/json"}
+		})
+		if not r or not r.Body then return nil end
+
+		local data = HttpService:JSONDecode(r.Body)
+		if not data or not data.data then return nil end
+
+		local lowestServer
+		local lowestCount = math.huge
+
+		for _, s in ipairs(data.data) do
+			if s.playing < s.maxPlayers and s.id ~= game.JobId then
+				if s.playing < lowestCount then
+					lowestCount = s.playing
+					lowestServer = s.id
+				end
+			end
+		end
+
+		return lowestServer
+	end
+
+	local function hopServer()
+		if getgenv().STOP_HOP then return end
+
+		local sid = findLowPlayerServer()
+		if sid then
+			pcall(function()
+				TeleportService:TeleportToPlaceInstance(PLACE_ID, sid, localPlayer)
+			end)
+		else
+			pcall(function()
+				TeleportService:Teleport(PLACE_ID, localPlayer)
+			end)
+		end
+	end
+
+	local function getStat(name)
+		local stats = localPlayer:FindFirstChild("leaderstats")
+		if stats then
+			local val = stats:FindFirstChild(name)
+			if val then
+				return tonumber(val.Value)
+			end
+		end
+		return nil
+	end
+
+	local damageDetected = false
+
+	local function watchDamageRemotes()
+		for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+			if v:IsA("RemoteEvent") then
+				local n = v.Name:lower()
+				if string.find(n, "damage") or string.find(n, "hit") then
+					v.OnClientEvent:Connect(function()
+						damageDetected = true
+					end)
+				end
+			end
+		end
+	end
+
+	task.spawn(function()
+		local beliStart = getStat(BELI_NAME) or 0
+		local fragStart = getStat(FRAG_NAME) or 0
+
+		local beliIncreased = false
+		local fragDecreased = false
+
+		local stats = localPlayer:WaitForChild("leaderstats", 10)
+		if not stats then return end
+
+		local beliObj = stats:FindFirstChild(BELI_NAME)
+		local fragObj = stats:FindFirstChild(FRAG_NAME)
+
+		if beliObj then
+			beliObj.Changed:Connect(function()
+				if tonumber(beliObj.Value) > beliStart then
+					beliIncreased = true
+				end
+			end)
+		end
+
+		if fragObj then
+			fragObj.Changed:Connect(function()
+				if tonumber(fragObj.Value) < fragStart then
+					fragDecreased = true
+				end
+			end)
+		end
+
+		watchDamageRemotes()
+
+		local elapsed = 0
+		while elapsed < TIMEOUT_SECONDS do
+			task.wait(1)
+			elapsed += 1
+			if beliIncreased or fragDecreased or damageDetected then
+				return
+			end
+		end
+
+		if not (beliIncreased or fragDecreased or damageDetected) then
+			hopServer()
+		end
+	end)
+
+	task.wait(130)
+end
